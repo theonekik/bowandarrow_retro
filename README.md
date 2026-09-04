@@ -6,12 +6,13 @@ Two ways to play, both pure HTML/CSS/JS with zero dependencies — just open in 
 
 | File | What it is |
 |------|-----------|
-| `index.html` | The original retro edition — pixel-art archers (Spider-Man, Iron-Man, Legolas), 3 terrains |
+| `index.html` | Landing page — pick an edition, then play |
 | `beautiful.html` | The reimagined edition — realistic archer, recurve bow, cinematic impacts, tougher rules |
+| `retro.html` | The original retro edition — pixel-art archers (Spider-Man, Iron-Man, Legolas), 3 terrains |
 
 ## 🎮 How to Play
 
-1. Open `beautiful.html` (or `index.html` for retro) in any modern browser
+1. Open `index.html` in any modern browser and pick your edition (or open `beautiful.html` / `retro.html` directly)
 2. Choose your **terrain** (Forest, Snow Mountain, Desert)
 3. Choose your **archer** (Ember, Azure, Sage)
 4. **Aim** with your mouse — **click** to fire each arrow
