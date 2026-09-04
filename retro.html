@@ -358,11 +358,11 @@
   const MAX_ROUNDS = 5;
   const CHARACTER_POS = { x: 120, y: 300 };
   const ROUND_CONFIG = [
-    { targetX: 550, ringScale: 1.00, label: 'EASY' },
-    { targetX: 600, ringScale: 0.95, label: 'MEDIUM' },
-    { targetX: 650, ringScale: 0.90, label: 'HARD' },
-    { targetX: 700, ringScale: 0.85, label: 'EXPERT' },
-    { targetX: 750, ringScale: 0.80, label: 'LEGEND' },
+    { targetX: 560, ringScale: 1.00, label: 'ROOKIE' },
+    { targetX: 610, ringScale: 0.90, label: 'SKILLED' },
+    { targetX: 655, ringScale: 0.80, label: 'HARD' },
+    { targetX: 690, ringScale: 0.72, label: 'EXPERT' },
+    { targetX: 715, ringScale: 0.64, label: 'LEGEND' },
   ];
 
   const TERRAINS = [
@@ -644,6 +644,9 @@
     ctx.translate(x, y);
     ctx.scale(scale, scale);
 
+    // Chunky idle bob — whole-pixel steps keep it pixel-crisp
+    ctx.translate(0, Math.round(Math.sin((state.targetTime || 0) * 6) * 1.5));
+
     if (charId === 'spiderman') {
       // Body (red)
       ctx.fillStyle = '#cc0000';
@@ -675,6 +678,16 @@
       // Web shooters
       ctx.fillStyle = '#888';
       ctx.fillRect(20, -26, 4, 4);
+
+      // Retro finish: black outline, side shading, eye glint
+      ctx.strokeStyle = '#0a0a12';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-12, -30, 24, 30);
+      ctx.strokeRect(-10, -44, 20, 16);
+      ctx.fillStyle = '#7a0000';
+      ctx.fillRect(4, -30, 8, 30);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(-8, -40, 2, 2);
     } else if (charId === 'ironman') {
       // Body armor (red)
       ctx.fillStyle = '#a52a2a';
@@ -712,6 +725,16 @@
       // Repulsor glow
       ctx.fillStyle = '#4fc3f7';
       ctx.fillRect(22, -26, 4, 4);
+
+      // Retro finish: black outline, side shading, eye glint
+      ctx.strokeStyle = '#0a0a12';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-14, -30, 28, 32);
+      ctx.strokeRect(-10, -46, 20, 18);
+      ctx.fillStyle = '#6e1f1f';
+      ctx.fillRect(6, -30, 8, 32);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(-8, -42, 2, 1);
     } else {
       // Legolas
       // Body (green)
@@ -748,16 +771,21 @@
       ctx.fillStyle = '#5d4037';
       ctx.fillRect(-10, 0, 8, 16);
       ctx.fillRect(2, 0, 8, 16);
-      // Bow on arm
-      ctx.strokeStyle = '#8d6e63';
+      // Extended arm reaching for the bow (bow itself drawn in-world, aimed)
+      ctx.fillStyle = '#2e7d32';
+      ctx.fillRect(8, -24, 16, 7);
+      ctx.fillStyle = '#ffcc99';
+      ctx.fillRect(22, -24, 5, 7);
+
+      // Retro finish: black outline, side shading, eye glint
+      ctx.strokeStyle = '#0a0a12';
       ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(18, -16, 14, -Math.PI/2, Math.PI/2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(18, -30);
-      ctx.lineTo(18, -2);
-      ctx.stroke();
+      ctx.strokeRect(-10, -28, 20, 28);
+      ctx.strokeRect(-8, -44, 16, 18);
+      ctx.fillStyle = '#1b5e20';
+      ctx.fillRect(2, -28, 8, 28);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(-5, -38, 1, 1);
     }
 
     ctx.restore();
@@ -799,7 +827,9 @@
   }
 
   function changeWind() {
-    state.wind = (Math.random() - 0.5) * 5; // -2.5 to +2.5
+    // Wind grows meaner every round: R1 ±2.5 … R5 ±5.7
+    const wBase = 2.5 + (state.round - 1) * 0.8;
+    state.wind = (Math.random() - 0.5) * 2 * wBase;
     state.windChangeTimer = 2 + Math.floor(Math.random() * 2); // 2-3 shots
   }
 
@@ -811,6 +841,7 @@
     state.bestStreak = 0;
     state.totalHits = 0;
     state.totalShots = 0;
+    state.consecMisses = 0;
     state.highestScore = 0;
     gameActive = true;
 
@@ -929,9 +960,9 @@
     if (!gameActive) return;
 
     try {
-      // --- Moving target ---
-      state.targetTime += 0.025;
-      state.targetY = TARGET_BASE.y + Math.sin(state.targetTime) * 50;
+      // --- Moving target: faster + wider swing every round ---
+      state.targetTime += 0.025 + (state.round - 1) * 0.008;
+      state.targetY = TARGET_BASE.y + Math.sin(state.targetTime) * (50 + (state.round - 1) * 10);
 
       // Clear & draw
       ctx.clearRect(0, 0, 800, 600);
@@ -1256,6 +1287,39 @@
     const x = CHARACTER_POS.x;
     const y = CHARACTER_POS.y;
     drawCharacterSprite(ctx, x, y, charId, 1.3);
+    drawRetroBow(ctx, x, y);
+  }
+
+  // Chunky wooden bow in the character's hands, aimed at the cursor —
+  // drawn for every character so the archer always looks armed.
+  function drawRetroBow(ctx, x, y) {
+    if (!gameActive || state.sessionOver) return;
+    const hx = x + 26, hy = y - 22; // grip just in front of the archer
+    let ang = Math.atan2(state.mouseY - hy, state.mouseX - hx);
+    if (Math.cos(ang) <= 0) ang = 0; // never point backwards
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(ang);
+    // Wood limbs: dark outline + wood core + light edge (pixel look)
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#0a0a12'; ctx.lineWidth = 9;
+    ctx.beginPath(); ctx.arc(0, 0, 22, -Math.PI/2.3, Math.PI/2.3); ctx.stroke();
+    ctx.strokeStyle = '#8b5a2b'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(0, 0, 22, -Math.PI/2.3, Math.PI/2.3); ctx.stroke();
+    ctx.strokeStyle = '#d9a066'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, 22, -Math.PI/2.3, Math.PI/2.3); ctx.stroke();
+    // String
+    const sy = 22 * Math.sin(Math.PI/2.3);
+    ctx.strokeStyle = '#eeeeee'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, -sy); ctx.lineTo(0, sy); ctx.stroke();
+    // Nocked arrow while waiting to fire
+    if (!state.isAnimating && state.arrowsLeft > 0) {
+      ctx.fillStyle = '#0a0a12'; ctx.fillRect(-27, -3, 27, 6);
+      ctx.fillStyle = '#d9c49a'; ctx.fillRect(-26, -2, 26, 4);
+      ctx.fillStyle = '#d7dbe0'; ctx.fillRect(0, -3, 7, 6);
+      ctx.fillStyle = '#cc0000'; ctx.fillRect(-31, -4, 5, 8);
+    }
+    ctx.restore();
   }
 
   // ===================================================================
@@ -1365,69 +1429,62 @@
       ctx.stroke();
     }
 
-    const len = 24;
+    const len = 30;
     ctx.save();
     ctx.translate(arrow.x, arrow.y);
     ctx.rotate(arrow.angle);
 
-    // Shaft
-    ctx.strokeStyle = '#8b4513';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(-len/2, 0);
-    ctx.lineTo(len/2, 0);
-    ctx.stroke();
+    // Pixel shaft: black outline, wood core, light top edge
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(-len/2 - 1, -3, len + 2, 6);
+    ctx.fillStyle = '#c89b5a';
+    ctx.fillRect(-len/2, -2, len, 4);
+    ctx.fillStyle = '#e8c987';
+    ctx.fillRect(-len/2, -2, len, 1);
 
-    // Arrowhead
-    ctx.fillStyle = '#c0c0c0';
-    ctx.beginPath();
-    ctx.moveTo(len/2 + 2, 0);
-    ctx.lineTo(len/2 - 4, -4);
-    ctx.lineTo(len/2 - 4, 4);
-    ctx.closePath();
-    ctx.fill();
+    // Stepped steel head
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(len/2 - 1, -4, 9, 8);
+    ctx.fillStyle = '#d7dbe0';
+    ctx.fillRect(len/2, -3, 7, 6);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(len/2, -3, 7, 2);
 
-    // Fletching
+    // Two-tone fletching (red over white)
     ctx.fillStyle = '#cc0000';
-    ctx.beginPath();
-    ctx.moveTo(-len/2, 0);
-    ctx.lineTo(-len/2 - 4, -4);
-    ctx.lineTo(-len/2 - 2, 0);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#cc0000';
-    ctx.beginPath();
-    ctx.moveTo(-len/2, 0);
-    ctx.lineTo(-len/2 - 4, 4);
-    ctx.lineTo(-len/2 - 2, 0);
-    ctx.closePath();
-    ctx.fill();
+    ctx.fillRect(-len/2 - 7, -6, 7, 5);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(-len/2 - 7, 1, 7, 5);
 
     ctx.restore();
   }
 
   function drawEmbeddedArrow(ctx, shot) {
+    // Only board hits stay visible — misses sail through, never float in air
+    if (!shot.stuck) return;
+    const len = 24;
+    // Bury the tip at the exact hit point; the tail sticks out toward the archer
+    const bx = shot.hitX - Math.cos(shot.angle) * (len / 2 - 4);
+    const by = shot.hitY - Math.sin(shot.angle) * (len / 2 - 4);
     ctx.save();
-    ctx.translate(shot.hitX, shot.hitY);
+    ctx.translate(bx, by);
     ctx.rotate(shot.angle);
 
-    const len = 20;
-    // Shaft
-    ctx.strokeStyle = '#8b4513';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(-len/2, 0);
-    ctx.lineTo(len/2, 0);
-    ctx.stroke();
+    // Pixel shaft: black outline, wood core, light top edge
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(-len/2 - 1, -3, len + 2, 6);
+    ctx.fillStyle = '#c89b5a';
+    ctx.fillRect(-len/2, -2, len, 4);
+    ctx.fillStyle = '#e8c987';
+    ctx.fillRect(-len/2, -2, len, 1);
 
-    // Arrowhead
-    ctx.fillStyle = '#c0c0c0';
-    ctx.beginPath();
-    ctx.moveTo(len/2 + 2, 0);
-    ctx.lineTo(len/2 - 4, -4);
-    ctx.lineTo(len/2 - 4, 4);
-    ctx.closePath();
-    ctx.fill();
+    // Stepped steel head (tip buried in the board)
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(len/2 - 1, -4, 9, 8);
+    ctx.fillStyle = '#d7dbe0';
+    ctx.fillRect(len/2, -3, 7, 6);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(len/2, -3, 7, 2);
 
     ctx.restore();
   }
@@ -1445,6 +1502,7 @@
     a.flightTime = (a.flightTime || 0) + 1;
     if (a.flightTime > 200) {
       a.score = -10;
+      a.stuck = false;
       a.hitX = Math.min(Math.max(a.x, 0), 800);
       a.hitY = Math.min(Math.max(a.y, 0), 600);
       endArrow(a);
@@ -1468,9 +1526,14 @@
     a.x += a.vx;
     a.y += a.vy;
 
+    // Nose follows the true flight path (gravity bends it) —
+    // so the stuck arrow shows the real impact angle
+    a.angle = Math.atan2(a.vy, a.vx);
+
     // Check if out of bounds
     if (a.x > 820 || a.x < -20 || a.y > 620 || a.y < -20) {
       a.score = -10;
+      a.stuck = false;
       a.hitX = Math.min(Math.max(a.x, 0), 800);
       a.hitY = Math.min(Math.max(a.y, 0), 600);
       endArrow(a);
@@ -1494,6 +1557,9 @@
       a.hitX = hitX;
       a.hitY = hitY;
       a.distance = dist;
+      // Stuck only if it lands on the board face (rings + wooden rim) —
+      // anything else sails through and is never drawn floating in mid-air
+      a.stuck = dist <= (OUTER_RADIUS + 12) * ringScale;
 
       if (dist <= outerR) {
         let score = 1;
@@ -1514,6 +1580,7 @@
     // Check if arrow passed the target (missed entirely)
     if (a.x > targetX + outerR) {
       a.score = -10;
+      a.stuck = false;
       a.hitX = a.x;
       a.hitY = a.y;
       endArrow(a);
@@ -1537,6 +1604,8 @@
     } else {
       state.streak = 0;
     }
+    // 3 consecutive misses ends the whole run (same rule as the modern edition)
+    state.consecMisses = isHit ? 0 : (state.consecMisses || 0) + 1;
 
     const multiplier = 1 + Math.floor(state.streak / 2) * 0.5;
     const finalScore = Math.round(arrow.score * multiplier);
@@ -1549,6 +1618,7 @@
       hitX: arrow.hitX,
       hitY: arrow.hitY,
       angle: arrow.angle,
+      stuck: !!arrow.stuck,
       score: finalScore
     });
 
@@ -1615,7 +1685,18 @@
 
     updateHUD();
 
-    // Check session end
+    // Check session end — out of arrows, or 3 straight misses ends the run
+    if ((state.consecMisses || 0) >= 3) {
+      state.round = MAX_ROUNDS; // elimination jumps straight to final results
+      state.arrowsLeft = 0;
+      state.floatingTexts.push({
+        x: 400, y: 140,
+        text: '❌ 3 MISSES — ELIMINATED!',
+        color: '#ff4444',
+        life: 70,
+        maxLife: 70
+      });
+    }
     if (state.arrowsLeft <= 0) {
       state.sessionOver = true;
       state.sessionEndTimer = 75;
