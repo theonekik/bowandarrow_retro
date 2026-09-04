@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bow & Arrow — Reimagined</title>
+<style>
+  :root { --fg:#f4f1ea; --muted:#b9b3a5; --accent:#ffb454; --card:#1c1a24; --border:#3a3548; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#12101a; color:var(--fg); font-family:-apple-system,'SF Pro',Inter,Segoe UI,sans-serif;
+    display:flex; flex-direction:column; align-items:center; min-height:100vh; padding:20px; }
+  h1 { font-size:26px; letter-spacing:1px; margin-bottom:4px; }
+  h1 span { color:var(--accent); }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:14px; }
+  #wrap { position:relative; width:min(960px,96vw); }
+  canvas { width:100%; border-radius:14px; display:block; cursor:crosshair;
+    box-shadow:0 18px 60px rgba(0,0,0,.55), 0 0 0 1px var(--border); }
+  #hud { display:flex; gap:10px; flex-wrap:wrap; margin:12px 0; }
+  .pill { background:var(--card); border:1px solid var(--border); border-radius:999px;
+    padding:7px 14px; font-size:13px; font-weight:600; }
+  .pill b { color:var(--accent); }
+  #bar { display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; align-items:center; }
+  button { background:var(--accent); color:#1a1408; border:none; border-radius:10px;
+    padding:11px 22px; font-size:14px; font-weight:700; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--fg); border:1px solid var(--border); }
+  button:hover { filter:brightness(1.08); }
+  select { background:var(--card); color:var(--fg); border:1px solid var(--border);
+    border-radius:10px; padding:10px 12px; font-size:13px; }
+  #overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(10,8,16,.72); backdrop-filter:blur(6px); border-radius:14px; text-align:center; padding:24px; }
+  #overlay.hidden { display:none; }
+  #overlay h2 { font-size:30px; margin-bottom:8px; }
+  #overlay p { color:var(--muted); font-size:14px; line-height:1.7; max-width:520px; margin:0 auto 16px; }
+  #scores { margin-top:10px; font-size:13px; color:var(--muted); }
+  #scores ol { margin:8px 0 0 20px; text-align:left; line-height:1.9; color:var(--fg); }
+</style>
+</head>
+<body>
+<h1>🏹 Bow &amp; Arrow <span>Reimagined</span></h1>
+<div class="sub">Same rules as your retro original — 5 rounds × 10 arrows · wind · streaks · moving target. Aim with mouse, click to fire.</div>
+<div id="wrap">
+  <canvas id="cv" width="960" height="600"></canvas>
+  <div id="overlay">
+    <div>
+      <h2 id="ov-title">Ready?</h2>
+      <p id="ov-text">Center ring 10 pts · then 5 / 3 / 2 / 1 · miss −10.<br>Every 2 consecutive hits adds +0.5× multiplier. Watch the wind flag.</p>
+      <button id="play">▶ &nbsp;Start Game</button>
+      <div id="scores"></div>
+    </div>
+  </div>
+</div>
+<div id="hud">
+  <div class="pill">Score <b id="h-score">0</b></div>
+  <div class="pill">Round <b id="h-round">1/5</b></div>
+  <div class="pill">Arrow <b id="h-arrow">1/10</b></div>
+  <div class="pill">Streak <b id="h-streak">0</b> · <b id="h-mult">1×</b></div>
+  <div class="pill">Wind <b id="h-wind">→ 0.0</b></div>
+</div>
+<div id="bar">
+  <select id="terrain">
+    <option value="forest">🌲 Forest dusk</option>
+    <option value="snow">🏔️ Snow peaks</option>
+    <option value="desert">🏜️ Desert night</option>
+  </select>
+  <select id="archer">
+    <option value="ember">🔥 Ember (red)</option>
+    <option value="azure">💧 Azure (blue)</option>
+    <option value="sage">🌿 Sage (green)</option>
+  </select>
+  <button class="ghost" id="restart">Restart</button>
+</div>
+
+<script>
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const W = 960, H = 600, GROUND = 500;
+const RINGS = [ {r:13,p:10,c:'#ffdf6b'}, {r:32,p:5,c:'#ff8a5c'}, {r:58,p:3,c:'#4fd1ff'}, {r:92,p:2,c:'#f4f1ea'}, {r:130,p:1,c:'#7a7590'} ];
+const ROUNDS = [ {dist:710,scale:1.0},{dist:765,scale:0.88},{dist:805,scale:0.78},{dist:840,scale:0.68},{dist:865,scale:0.6} ];
+const ARCHERS = { ember:'#ff6b5e', azure:'#4fb4ff', sage:'#7ce38b' };
+const THEMES = {
+  forest:{ sky:['#2b3a67','#e88ca0','#ffd9a0'], far:'#4a5a8a', near:'#2e4a3e', ground:'#22352b', grass:'#3f7a4e', amb:'leaf' },
+  snow:{ sky:['#1c2b52','#7fa8d9','#e8f2ff'], far:'#8aa4c8', near:'#5a7396', ground:'#dfe9f5', grass:'#b9cde6', amb:'snow' },
+  desert:{ sky:['#1a1440','#5a3a8a','#ff9a5c'], far:'#6a4a7a', near:'#3a2a52', ground:'#2e2140', grass:'#c9a06b', amb:'sand' }
+};
+let S;
+function reset(){ S = { round:0, arrow:0, score:0, streak:0, best:0, hits:0, shots:0,
+  wind:(Math.random()*2-1)*1.2, windTimer:0, arrows:[], parts:[], amb:[], floaters:[],
+  target:{y:280,dir:1,speed:1.1}, aim:{x:600,y:280}, state:'menu', msg:'', msgT:0,
+  theme:'forest', color:'#ff6b5e',
+  stuck:[], shock:[], shake:0, targetHit:0, release:0 };
+  for(let i=0;i<70;i++) S.amb.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*2+1,v:Math.random()*.6+.2,o:Math.random()*.5+.2});
+}
+reset();
+
+function mult(){ return 1 + Math.floor(S.streak/2)*0.5; }
+function targetPos(){ const r = ROUNDS[S.round]; return { x:r.dist, y:S.target.y, scale:r.scale }; }
+
+function fire(tx,ty){
+  if(S.state!=='play') return;
+  const ax=150, ay=400;
+  const dx=tx-ax, dy=ty-ay, d=Math.hypot(dx,dy)||1;
+  const spd = 13;
+  S.arrows.push({x:ax,y:ay,vx:dx/d*spd,vy:dy/d*spd-1.5,trail:[],dead:false,flex:Math.random()*6});
+  S.release = 1; // bow snap
+  tone(220,0.08,'sawtooth',0.05);
+  setTimeout(()=>tone(150,0.06,'sawtooth',0.04),40);
+}
+
+function step(){
+  // target oscillation — faster + smaller each round
+  const t = S.target;
+  t.y += t.dir * t.speed;
+  if(t.y<150||t.y>400) t.dir*=-1;
+  // wind shifts every 2-3 shots-ish
+  S.windTimer--;
+  if(S.windTimer<=0){ S.wind = (Math.random()*2-1)*(1+S.round*0.35); S.windTimer = 120+Math.random()*80; }
+  // arrows
+  const tp = targetPos();
+  if(S.release>0) S.release=Math.max(0,S.release-0.12);
+  if(S.targetHit>0) S.targetHit=Math.max(0,S.targetHit-0.08);
+  if(S.shake>0) S.shake=Math.max(0,S.shake-0.6);
+  for(const a of S.arrows){
+    if(a.dead) continue;
+    a.trail.push({x:a.x,y:a.y}); if(a.trail.length>14) a.trail.shift();
+    a.flex+=0.6;
+    a.vy += 0.09; a.vx += S.wind*0.02; a.x += a.vx; a.y += a.vy;
+    // hit target? (rim contact → drive tip into the face along flight dir)
+    const d = Math.hypot(a.x-tp.x, a.y-tp.y);
+    if(d < 130*tp.scale + 6 && a.vx > 0){
+      const R = 130*tp.scale, sp = Math.hypot(a.vx,a.vy)||1;
+      const dy0 = a.y - tp.y;
+      const hc = Math.sqrt(Math.max(R*R - dy0*dy0, 0)); // half-chord at entry height
+      const pen = hc>4 ? hc*(0.5+Math.random()*1.1) : 10+Math.random()*12;
+      let hx = a.x + a.vx/sp*pen, hy = a.y + a.vy/sp*pen;
+      let ddx = hx-tp.x, ddy = hy-tp.y, dd = Math.hypot(ddx,ddy)||1;
+      if(dd > R-6){ const k=(R-6)/dd; hx=tp.x+ddx*k; hy=tp.y+ddy*k; dd=R-6; } // keep tip on the face
+      const rr = dd/tp.scale;
+      let ring = RINGS.findIndex(r=>rr<=r.r); if(ring<0) ring=4;
+      const pts = Math.round(RINGS[ring].p * mult());
+      S.score += pts; S.streak++; S.best=Math.max(S.best,S.streak); S.hits++; S.shots++;
+      // --- stick the arrow into the board (rides the moving target) ---
+      const ang = Math.atan2(a.vy,a.vx);
+      S.stuck.push({dx:hx-tp.x, dy:hy-tp.y, ang, ring, life:600});
+      if(S.stuck.length>14) S.stuck.shift();
+      // --- impact feel: shake, wobble, shockwave, debris ---
+      S.targetHit = 1; S.shake = ring===0? 7 : ring===1? 5 : 3.5;
+      S.shock.push({r:10*tp.scale, max:(RINGS[ring].r+26)*tp.scale, life:1, c:RINGS[ring].c});
+      burst(hx,hy,RINGS[ring].c,26);
+      chips(hx,hy,ang,10+ring*2);
+      S.floaters.push({x:tp.x,y:tp.y-40,text:'+'+pts,life:60,c:RINGS[ring].c});
+      thunk(ring);
+      S.consec=0;
+      a.dead=true; nextArrow(); continue;
+    }
+    if(a.x>W+30||a.y>GROUND+10||a.y<-40){ // miss
+      S.score -= 10; S.streak=0; S.shots++;
+      S.consec=(S.consec||0)+1;
+      S.floaters.push({x:Math.min(a.x,W-60),y:Math.min(a.y,GROUND-20),text:'−10',life:60,c:'#ff5c5c'});
+      tone(160,0.2,'square',0.05);
+      puff(a.x,Math.min(a.y,GROUND));
+      a.dead=true;
+      if(S.consec>=3){ gameOver('3 misses in a row — the run ends here.'); return; }
+      nextArrow();
+    }
+  }
+  S.arrows = S.arrows.filter(a=>!a.dead);
+  // particles
+  for(const p of S.parts){ p.x+=p.vx; p.y+=p.vy; p.vy+=p.g; p.life--; if(p.chip) p.rot+=p.vr; }
+  S.parts = S.parts.filter(p=>p.life>0);
+  for(const f of S.floaters){ f.y-=0.8; f.life--; }
+  S.floaters = S.floaters.filter(f=>f.life>0);
+  for(const s of S.stuck) s.life--;
+  S.stuck = S.stuck.filter(s=>s.life>0);
+  for(const s of S.shock){ s.r += (s.max-s.r)*0.22; s.life -= 0.07; }
+  S.shock = S.shock.filter(s=>s.life>0);
+  // ambient drift
+  for(const m of S.amb){ m.x -= m.v*0.6 + S.wind*0.4; m.y += m.v*0.3; if(m.x<-10){m.x=W+10;m.y=Math.random()*H;} if(m.y>H){m.y=-10;m.x=Math.random()*W;} }
+  if(S.msgT>0) S.msgT--;
+  updateHUD();
+}
+
+function vignette(){
+  const g = ctx.createRadialGradient(W/2,H/2,H*0.35,W/2,H/2,H*0.85);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(8,4,18,.45)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+}
+
+function nextArrow(){
+  S.arrow++;
+  if(S.arrow>=10){
+    S.arrow=0; S.round++;
+    S.stuck.length=0; // fresh board each round
+    S.target.speed += 0.5;
+    if(S.round>=5){ gameOver(); return; }
+    S.msg = 'ROUND '+(S.round+1); S.msgT=110;
+  }
+}
+
+function burst(x,y,c,n){ for(let i=0;i<n;i++){ const a=Math.random()*Math.PI*2,s=Math.random()*4+1;
+  S.parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-1,g:0.12,life:40+Math.random()*25,c,r:Math.random()*3+1.5}); } }
+function puff(x,y){ for(let i=0;i<10;i++){ S.parts.push({x:x+(Math.random()*20-10),y,vx:Math.random()*2-1,vy:-Math.random()*2-0.5,g:-0.02,life:35,c:'rgba(200,190,170,.7)',r:Math.random()*4+2}); } }
+// wood chips + dust kicked off the board along the impact angle
+function chips(x,y,ang,n){ for(let i=0;i<n;i++){ const sp=Math.random()*4+1.5, sp2=(Math.random()-0.5)*3;
+  S.parts.push({x,y,vx:Math.cos(ang+Math.PI)*sp+sp2,vy:Math.sin(ang+Math.PI)*sp-Math.random()*2,g:0.18,life:34+Math.random()*22,
+    c:Math.random()<0.5?'#8a5a33':'#c99a5e',r:Math.random()*2.5+1.5,chip:true,rot:Math.random()*6,vr:(Math.random()-0.5)*0.4}); } }
+// deep wooden thunk + ring chime
+function thunk(ring){ tone(95,0.14,'sine',0.16); tone(180,0.09,'triangle',0.1);
+  setTimeout(()=>tone(660+(5-ring)*130,0.12,'sine',0.07),45); }
+
+// ---------- rendering ----------
+function sky(th){
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,th.sky[0]); g.addColorStop(0.55,th.sky[1]); g.addColorStop(1,th.sky[2]);
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // sun/moon glow
+  const sg = ctx.createRadialGradient(730,140,10,730,140,150);
+  sg.addColorStop(0,'rgba(255,240,200,.95)'); sg.addColorStop(0.25,'rgba(255,220,160,.45)'); sg.addColorStop(1,'rgba(255,220,160,0)');
+  ctx.fillStyle=sg; ctx.fillRect(560,0,340,320);
+  ctx.fillStyle='#fff3d6'; ctx.beginPath(); ctx.arc(730,140,30,0,7); ctx.fill();
+}
+function mountains(th){
+  ctx.fillStyle=th.far; ctx.beginPath(); ctx.moveTo(0,GROUND);
+  const peaks=[[0,330],[120,240],[240,340],[360,220],[500,340],[640,250],[800,350],[960,260],[960,GROUND]];
+  peaks.forEach(p=>ctx.lineTo(p[0],p[1])); ctx.lineTo(0,GROUND); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.35)';
+  [[120,240],[360,220],[640,250]].forEach(p=>{ ctx.beginPath(); ctx.moveTo(p[0]-34,p[1]+42); ctx.lineTo(p[0],p[1]); ctx.lineTo(p[0]+34,p[1]+42); ctx.lineTo(p[0]+14,p[1]+34); ctx.lineTo(p[0],p[1]+42); ctx.lineTo(p[0]-14,p[1]+34); ctx.fill(); });
+  ctx.fillStyle=th.near; ctx.beginPath(); ctx.moveTo(0,GROUND);
+  [[0,420],[180,360],[380,430],[600,370],[800,430],[960,380],[960,GROUND]].forEach(p=>ctx.lineTo(p[0],p[1]));
+  ctx.lineTo(0,GROUND); ctx.fill();
+}
+function ground(th){
+  ctx.fillStyle=th.ground; ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.fillStyle=th.grass; ctx.fillRect(0,GROUND,W,8);
+  ctx.fillStyle='rgba(0,0,0,.18)';
+  for(let x=0;x<W;x+=46) { ctx.fillRect(x,GROUND+22,20,5); }
+}
+function ambient(th){
+  for(const m of S.amb){
+    ctx.globalAlpha=m.o;
+    if(th.amb==='snow'){ ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(m.x,m.y,m.s,0,7); ctx.fill(); }
+    else if(th.amb==='leaf'){ ctx.fillStyle='#9fe6a0'; ctx.save(); ctx.translate(m.x,m.y); ctx.rotate(m.x*0.02); ctx.fillRect(-2,-1,4,2); ctx.restore(); }
+    else { ctx.fillStyle='#e8c88a'; ctx.fillRect(m.x,m.y,m.s+1,1.5); }
+    ctx.globalAlpha=1;
+  }
+}
+function drawTarget(tp){
+  // wooden A-frame stand
+  ctx.lineCap='round';
+  ctx.strokeStyle='#4a3320'; ctx.lineWidth=10;
+  ctx.beginPath(); ctx.moveTo(tp.x-34*tp.scale,GROUND); ctx.lineTo(tp.x-6*tp.scale,tp.y+96*tp.scale); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(tp.x+34*tp.scale,GROUND); ctx.lineTo(tp.x+6*tp.scale,tp.y+96*tp.scale); ctx.stroke();
+  ctx.strokeStyle='#6b4a2c'; ctx.lineWidth=6;
+  ctx.beginPath(); ctx.moveTo(tp.x-34*tp.scale,GROUND); ctx.lineTo(tp.x-6*tp.scale,tp.y+96*tp.scale); ctx.stroke();
+  // hit wobble: punch scale + tilt, decays via S.targetHit
+  const punch = 1 + S.targetHit*0.06, tilt = S.targetHit*0.05*Math.sin(T*30);
+  ctx.save(); ctx.translate(tp.x,tp.y); ctx.rotate(tilt); ctx.scale(punch,punch); ctx.translate(-tp.x,-tp.y);
+  // glow
+  const gl = ctx.createRadialGradient(tp.x,tp.y,10,tp.x,tp.y,150*tp.scale);
+  gl.addColorStop(0,'rgba(255,255,255,.20)'); gl.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=gl; ctx.beginPath(); ctx.arc(tp.x,tp.y,150*tp.scale,0,7); ctx.fill();
+  // wooden rim
+  ctx.fillStyle='#5a3a22'; ctx.beginPath(); ctx.arc(tp.x,tp.y,136*tp.scale,0,7); ctx.fill();
+  ctx.fillStyle='#7a5330'; ctx.beginPath(); ctx.arc(tp.x,tp.y,130*tp.scale,0,7); ctx.fill();
+  // rings outer→inner with inner shadow + top gloss
+  for(let i=RINGS.length-1;i>=0;i--){
+    const r=RINGS[i].r*tp.scale;
+    ctx.fillStyle=RINGS[i].c; ctx.beginPath(); ctx.arc(tp.x,tp.y,r,0,7); ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,.22)'; ctx.lineWidth=Math.max(1.5,4*tp.scale);
+    ctx.beginPath(); ctx.arc(tp.x,tp.y,r-2*tp.scale,0,7); ctx.stroke();
+  }
+  ctx.fillStyle='rgba(255,255,255,.28)';
+  ctx.beginPath(); ctx.ellipse(tp.x-34*tp.scale,tp.y-52*tp.scale,52*tp.scale,20*tp.scale,-0.5,0,7); ctx.fill();
+  ctx.fillStyle='#3a2a1a'; ctx.beginPath(); ctx.arc(tp.x,tp.y,5*tp.scale,0,7); ctx.fill();
+  // --- stuck arrows: tail + fletching jutting toward viewer, depth by ring ---
+  for(const s of S.stuck){
+    const sx=tp.x+s.dx, sy=tp.y+s.dy;
+    const depth = [10,8,6,5,4][s.ring]||4; // bullseye buries deepest
+    const tailLen = 46-depth;
+    ctx.save(); ctx.translate(sx,sy); ctx.rotate(s.ang);
+    ctx.globalAlpha=Math.min(1,s.life/120);
+    // entry dent
+    ctx.fillStyle='rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(0,0,7*tp.scale+3,5*tp.scale+2,0,0,7); ctx.fill();
+    // shaft (embedded part hidden, tail visible pointing back along -x)
+    const sg=ctx.createLinearGradient(-tailLen,0,0,0);
+    sg.addColorStop(0,'#a9804e'); sg.addColorStop(1,'#e8dcc8');
+    ctx.strokeStyle=sg; ctx.lineWidth=4; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(-tailLen,0); ctx.lineTo(-2,0); ctx.stroke();
+    // fletching (two feathers)
+    ctx.fillStyle='#ff5c5c';
+    ctx.beginPath(); ctx.moveTo(-tailLen,-1); ctx.lineTo(-tailLen-13,-8); ctx.lineTo(-tailLen-11,0); ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.beginPath(); ctx.moveTo(-tailLen,-1); ctx.lineTo(-tailLen-13,7); ctx.lineTo(-tailLen-11,-1); ctx.fill();
+    // nock
+    ctx.fillStyle='#5a3a22'; ctx.fillRect(-tailLen-15,-2.5,4,5);
+    ctx.restore();
+  }
+  ctx.restore();
+  // shockwaves
+  for(const s of S.shock){
+    ctx.globalAlpha=Math.max(0,s.life)*0.8;
+    ctx.strokeStyle=s.c; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(tp.x,tp.y,s.r,0,7); ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+}
+let T = 0; // anim clock
+function drawArcher(){
+  const x=150, y=400, c=S.color;
+  const breathe = Math.sin(T*2.2)*2;
+  // shadow
+  ctx.fillStyle='rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(x+6,y+58,52,11,0,0,7); ctx.fill();
+  // --- back leg / front leg (stance, boots) ---
+  ctx.lineCap='round';
+  ctx.strokeStyle='#241f33'; ctx.lineWidth=15;
+  ctx.beginPath(); ctx.moveTo(x-8,y+6); ctx.lineTo(x-22,y+52); ctx.stroke();   // back leg
+  ctx.strokeStyle='#2e2842'; ctx.lineWidth=15;
+  ctx.beginPath(); ctx.moveTo(x+10,y+6); ctx.lineTo(x+30,y+52); ctx.stroke();   // front leg
+  // boots
+  ctx.fillStyle='#171320';
+  roundRect(x-34,y+46,22,11,4); ctx.fill();
+  roundRect(x+20,y+46,24,11,4); ctx.fill();
+  // --- quiver on back with arrows ---
+  ctx.save(); ctx.translate(x-22,y-38+breathe*0.4); ctx.rotate(-0.18);
+  ctx.fillStyle='#5a3a26'; roundRect(-12,-34,22,52,6); ctx.fill();
+  ctx.fillStyle='#3d2716'; ctx.fillRect(-12,-34,22,8);
+  for(let i=0;i<3;i++){ ctx.strokeStyle='#e8dcc8'; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.moveTo(-6+i*6,-34); ctx.lineTo(-6+i*6,-48); ctx.stroke();
+    ctx.fillStyle='#ff5c5c'; ctx.beginPath(); ctx.moveTo(-9+i*6,-48); ctx.lineTo(-3+i*6,-48); ctx.lineTo(-6+i*6,-54); ctx.fill(); }
+  ctx.restore();
+  // --- torso: tunic with shading + belt + strap ---
+  const ty = y-52+breathe*0.5;
+  let g = ctx.createLinearGradient(x-22,0,x+22,0);
+  g.addColorStop(0,shade(c,-40)); g.addColorStop(0.5,c); g.addColorStop(1,shade(c,30));
+  ctx.fillStyle=g; roundRect(x-21,ty,44,58,12); ctx.fill();
+  // tunic skirt
+  ctx.fillStyle=shade(c,-30);
+  ctx.beginPath(); ctx.moveTo(x-21,ty+48); ctx.lineTo(x+23,ty+48); ctx.lineTo(x+28,ty+66); ctx.lineTo(x-26,ty+66); ctx.fill();
+  // belt
+  ctx.fillStyle='#2a1f16'; ctx.fillRect(x-21,ty+34,44,9);
+  ctx.fillStyle='#c9a06b'; ctx.fillRect(x-4,ty+34,10,9);
+  // shoulder strap
+  ctx.strokeStyle='#3d2c1c'; ctx.lineWidth=7;
+  ctx.beginPath(); ctx.moveTo(x-16,ty+4); ctx.lineTo(x+14,ty+40); ctx.stroke();
+  // cape fluttering behind
+  ctx.fillStyle='rgba(60,40,70,.85)';
+  const fl = Math.sin(T*5)*6;
+  ctx.beginPath(); ctx.moveTo(x-18,ty+6);
+  ctx.quadraticCurveTo(x-52,ty+20+fl,x-46,ty+64);
+  ctx.quadraticCurveTo(x-30,ty+56,x-16,ty+44); ctx.fill();
+  // --- head: profile facing right, hair, eye, nose ---
+  const hy = ty-24+breathe*0.3, hx = x+4;
+  ctx.fillStyle='#f0c096'; // neck
+  ctx.fillRect(hx-6,hy+8,14,12);
+  ctx.fillStyle='#f4cfa5'; // face profile
+  ctx.beginPath(); ctx.arc(hx,hy,16,0,7); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(hx+14,hy-4); ctx.lineTo(hx+21,hy+2); ctx.lineTo(hx+14,hy+5); ctx.fill(); // nose
+  ctx.fillStyle='#2a1a12'; // eye
+  ctx.beginPath(); ctx.arc(hx+7,hy-3,2.2,0,7); ctx.fill();
+  ctx.strokeStyle='#2a1a12'; ctx.lineWidth=2; // brow
+  ctx.beginPath(); ctx.moveTo(hx+3,hy-8); ctx.lineTo(hx+11,hy-7); ctx.stroke();
+  // hair
+  ctx.fillStyle='#3a2618';
+  ctx.beginPath(); ctx.arc(hx-3,hy-6,16,Math.PI*0.75,Math.PI*1.95); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(hx-18,hy-8); ctx.quadraticCurveTo(hx-26,hy+16+fl*0.5,hx-14,hy+22); ctx.lineTo(hx-10,hy+8); ctx.fill();
+  // headband in archer color
+  ctx.fillStyle=c; ctx.fillRect(hx-13,hy-12,28,6);
+  // --- arms: bow arm extended to aim, draw arm pulling string ---
+  const a=Math.atan2(S.aim.y-(ty+6),S.aim.x-x);
+  const bx = x+16+Math.cos(a)*34, by = ty+8+Math.sin(a)*34; // bow grip
+  // bow arm (sleeve + hand)
+  ctx.strokeStyle=shade(c,-25); ctx.lineWidth=11;
+  ctx.beginPath(); ctx.moveTo(x+10,ty+10); ctx.lineTo(bx,by); ctx.stroke();
+  ctx.fillStyle='#f4cfa5'; ctx.beginPath(); ctx.arc(bx,by,6,0,7); ctx.fill();
+  // recurve bow with snap kick on release
+  const snap = S.release*10; // limbs kick forward right after firing
+  ctx.save(); ctx.translate(bx,by); ctx.rotate(a+Math.PI/2);
+  const bend = 6+Math.hypot(S.aim.x-x,S.aim.y-ty)*0.008 - snap;
+  // limbs: dark core + honey highlight, recurve tips flick outward
+  ctx.lineCap='round';
+  ctx.strokeStyle='#4e2d15'; ctx.lineWidth=7;
+  ctx.beginPath(); ctx.moveTo(0,-38); ctx.quadraticCurveTo(bend,0,0,38); ctx.stroke();
+  ctx.strokeStyle='#a06a3a'; ctx.lineWidth=4;
+  ctx.beginPath(); ctx.moveTo(0,-38); ctx.quadraticCurveTo(bend,0,0,38); ctx.stroke();
+  ctx.strokeStyle='#d89a55'; ctx.lineWidth=1.6;
+  ctx.beginPath(); ctx.moveTo(-1,-36); ctx.quadraticCurveTo(bend-2,0,-1,36); ctx.stroke();
+  // recurve tips
+  ctx.strokeStyle='#3a2110'; ctx.lineWidth=4;
+  ctx.beginPath(); ctx.moveTo(0,-38); ctx.lineTo(-7,-44); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0,38); ctx.lineTo(-7,44); ctx.stroke();
+  // wrapped grip
+  ctx.strokeStyle='#2a1a10'; ctx.lineWidth=8;
+  ctx.beginPath(); ctx.moveTo(-2,-7); ctx.lineTo(-2,7); ctx.stroke();
+  ctx.strokeStyle='#c9a06b'; ctx.lineWidth=2;
+  for(let gi=-6;gi<=6;gi+=4){ ctx.beginPath(); ctx.moveTo(-5,gi); ctx.lineTo(1,gi); ctx.stroke(); }
+  // string with serving, slackens on release
+  const pull = 22 - S.release*14;
+  ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.lineWidth=1.6;
+  ctx.beginPath(); ctx.moveTo(-7,-44); ctx.lineTo(-pull,0); ctx.lineTo(-7,44); ctx.stroke();
+  ctx.strokeStyle='#c9a06b'; ctx.lineWidth=2.4; // serving at nock
+  ctx.beginPath(); ctx.moveTo(-pull,-4); ctx.lineTo(-pull,4); ctx.stroke();
+  // nocked arrow: wood shaft, steel tip with glint, feather fletching
+  ctx.rotate(-(a+Math.PI/2)); ctx.rotate(a);
+  ctx.strokeStyle='#d9c49a'; ctx.lineWidth=3.4;
+  ctx.beginPath(); ctx.moveTo(-pull-28,0); ctx.lineTo(14,0); ctx.stroke();
+  ctx.fillStyle='#cfd6dd'; ctx.beginPath(); ctx.moveTo(14,-4.5); ctx.lineTo(25,0); ctx.lineTo(14,4.5); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.moveTo(17,-3); ctx.lineTo(21,0); ctx.lineTo(17,1); ctx.fill(); // glint
+  ctx.fillStyle='#ff5c5c';
+  ctx.beginPath(); ctx.moveTo(-pull-28,-1); ctx.lineTo(-pull-40,-7); ctx.lineTo(-pull-38,0); ctx.fill();
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.moveTo(-pull-28,-1); ctx.lineTo(-pull-40,5); ctx.lineTo(-pull-38,-1); ctx.fill();
+  ctx.restore();
+  // draw arm: shoulder → elbow → hand at nock
+  const nx = bx-Math.cos(a)*pull, ny = by-Math.sin(a)*pull;
+  const ex = (x+10+nx)/2 - 6, ey = (ty+12+ny)/2 + 12; // elbow dips
+  ctx.strokeStyle=shade(c,-25); ctx.lineWidth=11;
+  ctx.beginPath(); ctx.moveTo(x+8,ty+10); ctx.quadraticCurveTo(ex,ey,nx,ny); ctx.stroke();
+  ctx.fillStyle='#f4cfa5'; ctx.beginPath(); ctx.arc(nx,ny,6,0,7); ctx.fill();
+  // wind flag
+  const w=S.wind;
+  ctx.strokeStyle='#ddd'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(x-60,ty-64); ctx.lineTo(x-60,ty-14); ctx.stroke();
+  ctx.fillStyle=Math.abs(w)<0.4?'#7ce38b':Math.abs(w)<1?'#ffdf6b':'#ff6b5e';
+  const L=20+Math.abs(w)*30;
+  ctx.beginPath(); ctx.moveTo(x-60,ty-64);
+  ctx.lineTo(x-60+(w>=0?L:-L),ty-58+fl*0.3); ctx.lineTo(x-60,ty-52); ctx.fill();
+}
+function shade(hex,amt){
+  const n=parseInt(hex.slice(1),16);
+  let r=(n>>16)+amt,gg=((n>>8)&255)+amt,b=(n&255)+amt;
+  r=Math.max(0,Math.min(255,r));gg=Math.max(0,Math.min(255,gg));b=Math.max(0,Math.min(255,b));
+  return '#'+((r<<16)|(gg<<8)|b).toString(16).padStart(6,'0');
+}
+function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect(x,y,w,h,r); }
+function drawArrows(){
+  for(const a of S.arrows){
+    // warm motion trail
+    for(let i=0;i<a.trail.length;i++){ const t=a.trail[i];
+      ctx.globalAlpha=i/a.trail.length*0.35; ctx.fillStyle='#ffd9a0';
+      ctx.beginPath(); ctx.arc(t.x,t.y,2.5,0,7); ctx.fill(); }
+    ctx.globalAlpha=1;
+    const ang=Math.atan2(a.vy,a.vx);
+    const wob = Math.sin(a.flex)*1.5; // shaft flex in flight
+    ctx.save(); ctx.translate(a.x,a.y); ctx.rotate(ang);
+    // shaft with slight flex curve
+    ctx.strokeStyle='#d9c49a'; ctx.lineWidth=3.4; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(-24,0); ctx.quadraticCurveTo(-5,wob,14,0); ctx.stroke();
+    ctx.strokeStyle='rgba(120,80,40,.6)'; ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.moveTo(-24,0.8); ctx.quadraticCurveTo(-5,wob+0.8,14,0.8); ctx.stroke();
+    // steel broadhead with glint
+    ctx.fillStyle='#cfd6dd'; ctx.beginPath(); ctx.moveTo(14,-5); ctx.lineTo(26,0); ctx.lineTo(14,5); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.moveTo(17,-3); ctx.lineTo(21.5,0); ctx.lineTo(17,1.2); ctx.fill();
+    // fletching: red + white feathers
+    ctx.fillStyle='#ff5c5c';
+    ctx.beginPath(); ctx.moveTo(-22,-1); ctx.lineTo(-35,-8); ctx.lineTo(-33,0); ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.beginPath(); ctx.moveTo(-22,-1); ctx.lineTo(-35,6); ctx.lineTo(-33,-1); ctx.fill();
+    ctx.fillStyle='#5a3a22'; ctx.fillRect(-25,-2,3.5,4); // nock
+    ctx.restore();
+  }
+  for(const p of S.parts){
+    ctx.globalAlpha=Math.min(1,p.life/30); ctx.fillStyle=p.c;
+    if(p.chip){ ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot||0);
+      ctx.fillRect(-p.r,-p.r/2,p.r*2,p.r); ctx.restore(); }
+    else { ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill(); }
+  }
+  ctx.globalAlpha=1;
+  ctx.font='bold 20px sans-serif'; ctx.textAlign='center';
+  for(const f of S.floaters){ ctx.globalAlpha=Math.min(1,f.life/40); ctx.fillStyle=f.c;
+    ctx.fillText(f.text,f.x,f.y); }
+  ctx.globalAlpha=1;
+}
+function render(){
+  T += 0.016;
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  if(S.shake>0) ctx.translate((Math.random()-0.5)*S.shake*2,(Math.random()-0.5)*S.shake*2);
+  const th = THEMES[S.theme];
+  sky(th); mountains(th); ground(th); ambient(th);
+  const tp = targetPos();
+  drawTarget(tp); drawArcher(); drawArrows(); ctx.restore();
+  // aim dotted line
+  if(S.state==='play'){
+    ctx.save(); ctx.setLineDash([6,8]); ctx.strokeStyle='rgba(255,255,255,.35)'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(160,392); ctx.lineTo(S.aim.x,S.aim.y); ctx.stroke(); ctx.restore();
+  }
+  if(S.msgT>0){ ctx.fillStyle='rgba(10,8,16,.55)'; ctx.fillRect(0,220,W,80);
+    ctx.fillStyle='#ffdf6b'; ctx.font='bold 44px sans-serif'; ctx.textAlign='center';
+    ctx.fillText(S.msg,W/2,272); }
+  vignette();
+}
+
+function updateHUD(){
+  document.getElementById('h-score').textContent=S.score;
+  document.getElementById('h-round').textContent=Math.min(S.round+1,5)+'/5';
+  document.getElementById('h-arrow').textContent=(S.arrow+1)+'/10';
+  document.getElementById('h-streak').textContent=S.streak;
+  document.getElementById('h-mult').textContent=mult().toFixed(1)+'×';
+  const w=S.wind, arrow=w>=0?'→':'←';
+  document.getElementById('h-wind').textContent=arrow+' '+Math.abs(w).toFixed(1);
+}
+
+// audio
+let AC=null;
+function tone(f,d,type,v){ try{ AC=AC||new (window.AudioContext||window.webkitAudioContext)();
+  const o=AC.createOscillator(),g=AC.createGain(); o.type=type; o.frequency.value=f;
+  g.gain.value=v; o.connect(g); g.connect(AC.destination); o.start();
+  g.gain.exponentialRampToValueAtTime(0.0001,AC.currentTime+d); o.stop(AC.currentTime+d);
+}catch(e){} }
+
+// leaderboard
+function board(){ try{ return JSON.parse(localStorage.getItem('bowArrowBeautiful')||'[]'); }catch(e){ return []; } }
+function saveBoard(n,s){ try{ const b=board(); b.push({n:(n||'YOU').slice(0,12),s}); b.sort((a,b2)=>b2.s-a.s);
+  localStorage.setItem('bowArrowBeautiful',JSON.stringify(b.slice(0,5))); }catch(e){} }
+function showBoard(el){ const b=board();
+  el.innerHTML = b.length? '<b>🏆 Top scores</b><ol>'+b.map(e=>'<li>'+e.n+' — '+e.s+'</li>').join('')+'</ol>' : ''; }
+
+function gameOver(reason){
+  S.state='over';
+  const acc = S.shots? Math.round(S.hits/S.shots*100):0;
+  document.getElementById('ov-title').textContent = S.score>0? '🎉 '+S.score+' pts!' : '💔 '+S.score;
+  document.getElementById('ov-text').innerHTML = 'Accuracy '+acc+'% · Best streak '+S.best+' · Hits '+S.hits+'/'+S.shots+(reason? '<br>'+reason : '')+'<br>Enter your name for the leaderboard, or just play again:';
+  const sc = document.getElementById('scores');
+  sc.innerHTML = '<div style="margin:8px 0"><input id="nm" maxlength="12" value="YOU" style="padding:6px 10px;border-radius:8px;border:1px solid #555;background:#1c1830;color:#fff;font-size:15px;width:130px;text-align:center"> <button id="saveScore" style="padding:6px 14px;border-radius:8px;border:0;background:#ffdf6b;font-weight:700;cursor:pointer">Save</button></div><div id="blist"></div>';
+  showBoard(document.getElementById('blist'));
+  document.getElementById('saveScore').onclick=()=>{
+    saveBoard(document.getElementById('nm').value, S.score);
+    showBoard(document.getElementById('blist'));
+    const b=document.getElementById('saveScore'); b.disabled=true; b.textContent='Saved ✓';
+  };
+  const pb=document.getElementById('play'); pb.innerHTML='↻ &nbsp;Play Again';
+  document.getElementById('overlay').classList.remove('hidden');
+  tone(350,0.15,'square',0.06); setTimeout(()=>tone(260,0.25,'square',0.06),180);
+}
+
+// input
+cv.addEventListener('mousemove',e=>{ const r=cv.getBoundingClientRect();
+  S.aim.x=(e.clientX-r.left)/r.width*W; S.aim.y=(e.clientY-r.top)/r.height*H; });
+cv.addEventListener('click',e=>{ const r=cv.getBoundingClientRect();
+  fire((e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H); });
+document.getElementById('play').onclick=()=>{
+  S.theme=document.getElementById('terrain').value;
+  S.color=ARCHERS[document.getElementById('archer').value];
+  const keepTheme=S.theme, keepColor=S.color;
+  reset(); S.theme=keepTheme; S.color=keepColor;
+  S.state='play'; S.msg='ROUND 1'; S.msgT=110;
+  document.getElementById('overlay').classList.add('hidden');
+};
+document.getElementById('restart').onclick=()=>document.getElementById('play').click();
+document.getElementById('terrain').onchange=e=>{S.theme=e.target.value;};
+document.getElementById('archer').onchange=e=>{S.color=ARCHERS[e.target.value];};
+
+showBoard(document.getElementById('scores'));
+(function loop(){ if(S.state==='play') step(); render(); requestAnimationFrame(loop); })();
+render();
+</script>
+</body>
+</html>
