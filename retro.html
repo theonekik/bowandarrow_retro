@@ -1886,6 +1886,21 @@
     // Add canvas event listeners once (not per game start)
     canvas.addEventListener('mousemove', onMouseMove);
     canvas.addEventListener('click', onCanvasClick);
+
+// ---- CHIPTUNE MUSIC (heroic loop: square lead + triangle bass + hat) ----
+const Music={ctx:null,timer:null,step:0,on:true,bpm:142,
+lead:['A5','C6','E6','A6','G6','E6','D6','C6','D6','E6','C6','D6','B5','0','A5','0'],
+bass:['A2','0','A2','0','F2','0','F2','0','C3','0','C3','0','G2','0','E3','A2'],
+F(n){if(!n||n==='0')return 0;const S={C:0,D:2,E:4,F:5,G:7,A:9,B:11};const m=n.match(/^([A-G])(#?)(\d)$/);return 440*Math.pow(2,((S[m[1]]+(m[2]?1:0)+(parseInt(m[3])+1)*12)-69)/12);},
+N(f,t,d,ty,v){const o=this.ctx.createOscillator(),g=this.ctx.createGain();o.type=ty;o.frequency.value=f;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(0.001,t+d);o.connect(g);g.connect(this.ctx.destination);o.start(t);o.stop(t+d+0.03);},
+tick(){if(!this.on||!this.ctx)return;const t=this.ctx.currentTime+0.03,s=this.step,L=this.F(this.lead[s]),B=this.F(this.bass[s]);if(L)this.N(L,t,0.2,'square',0.04);if(B)this.N(B,t,0.22,'triangle',0.08);if(s%2===0)this.N(7500,t,0.03,'square',0.01);this.step=(s+1)%16;},
+start(){try{this.ctx=getAudioCtx();if(this.ctx.state==='suspended')this.ctx.resume();}catch(e){}if(!this.ctx||this.timer)return;const self=this;this.timer=setInterval(function(){self.tick();},60000/this.bpm/2);},
+toggle(b){this.on=!this.on;if(b)b.textContent=this.on?'🔊':'🔇';try{localStorage.setItem('chipOn',this.on?'1':'0');}catch(e){}}};
+(function(){try{Music.on=localStorage.getItem('chipOn')!=='0';}catch(e){}
+const b=document.createElement('button');b.id='musicBtn';b.title='Music on/off';b.textContent=Music.on?'🔊':'🔇';
+b.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99;width:44px;height:44px;border-radius:50%;border:3px solid #0a0a12;background:#ffdf6b;font-size:20px;cursor:pointer;';
+b.onclick=function(){Music.start();Music.toggle(b);};document.body.appendChild(b);
+const k=function(){Music.start();};document.addEventListener('pointerdown',k,{once:true});document.addEventListener('keydown',k,{once:true});})();
     // Enter key to save score
     nameInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') saveScore();
