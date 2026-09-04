@@ -640,6 +640,110 @@
   //  CHARACTER SPRITES (pixel-art style)
   // ===================================================================
   function drawCharacterSprite(ctx, x, y, charId, scale = 1.0) {
+  // ===================================================================
+  //  TRUE PIXEL-ART ARCHERS — 14x18 sprites drawn 1px at a time into an
+  //  offscreen canvas, then blitted with smoothing off: crisp chunky
+  //  pixels at any scale. '.' = transparent.
+  // ===================================================================
+  const SPRITE_PAL = {
+    K: '#0a0a12',
+    R: '#cc0000', D: '#7a0000', // spidey red + web shade
+    B: '#2255cc', // spidey blue
+    W: '#ffffff',
+    O: '#daa520', C: '#4fc3f7', // ironman gold + glow
+    H: '#e8c05a', S: '#ffcc99', // legolas hair + skin
+    G: '#2e7d32', N: '#1b5e20', // legolas green + shade
+    E: '#5d4037', P: '#6d4c41', L: '#4e342e' // belt, pants, boots
+  };
+  const SPRITE_PX = {
+    spiderman: [
+      '....KKKKKK....',
+      '..KKRRRRRRKK..',
+      '.KRRRRRRRRRRK.',
+      '.KRWWKRRKWWRK.',
+      '.KRWWKRRKWWRK.',
+      '.KRRRRRRRRRRK.',
+      '..KRRRRRRRRK..',
+      '..KKRRRRRRKK..',
+      '.KBBRRRRRRBBK.',
+      '.KBBRRDRRDBBK.',
+      '.KBBRRRRRRBBK.',
+      '..KOOOOOOOOK..',
+      '...KBBBBBBK...',
+      '...KBBBBBBK...',
+      '...KRRRRRRK...',
+      '...KRRRRRRK...',
+      '..KKRRRRRRKK..',
+      '..KKK....KKK..'
+    ],
+    ironman: [
+      '....KKKKKK....',
+      '..KKOOOOOOKK..',
+      '.KOOOOOOOOOOK.',
+      '.KOCCKOOKCCOK.',
+      '.KOCCKOOKCCOK.',
+      '.KOOOOOOOOOOK.',
+      '..KOOOKKKOOK..',
+      '..KRRRRRRRRK..',
+      '.KRROOOOOORRK.',
+      '.KRRROCCORRRK.',
+      '.KRRROCCORRRK.',
+      '.KRRROOOORRRK.',
+      '..KRRRRRRRRK..',
+      '...KRRRRRRK...',
+      '...KROOOORK...',
+      '...KROOOORK...',
+      '...KRRRRRRK...',
+      '..KKRRRRRRKK..'.replace('RRRRRR', 'RRRRRR'),
+      '..KKK....KKK..'
+    ],
+    legolas: [
+      '....KKKKKK....',
+      '..KKHHHHHHKK..',
+      '.KHHHHHHHHHHK.',
+      '.KHSSSSSSSSHK.',
+      '.KHSSKSSKSSHK.',
+      '.KHSSSSSSSSHK.',
+      '...KSSSSSSK...',
+      '..KHHHSSHHHK..',
+      '.KGGGGGGGGGGK.',
+      '.KGGNGGGGNGGK.',
+      '.KGGGGGGGGGGK.',
+      '..KEEEEEEEEK..',
+      '...KPPPPPPK...',
+      '...KPPPPPPK...',
+      '...KPPPPPPK...',
+      '...KLLLLLLK...',
+      '..KKLLLLLLKK..',
+      '..KLLK..KLLK..'
+    ]
+  };
+  const _spriteCache = {};
+  function getSprite(charId) {
+    if (!_spriteCache[charId]) {
+      const rows = SPRITE_PX[charId];
+      const c = document.createElement('canvas');
+      c.width = rows[0].length;
+      c.height = rows.length;
+      const g = c.getContext('2d');
+      rows.forEach((row, r) => {
+        for (let i = 0; i < row.length; i++) {
+          const col = SPRITE_PAL[row[i]];
+          if (col) { g.fillStyle = col; g.fillRect(i, r, 1, 1); }
+        }
+      });
+      _spriteCache[charId] = c;
+    }
+    return _spriteCache[charId];
+  }
+  // Blit centered on x: 14px * 3.5 = 49u wide, 18 * 3.5 = 63u tall,
+  // top at -47 so the boots land exactly where the old sprite's feet were
+  function blitSprite(ctx, charId) {
+    const img = getSprite(charId);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, -24.5, -47, 49, 63);
+  }
+
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(scale, scale);
@@ -648,144 +752,43 @@
     ctx.translate(0, Math.round(Math.sin((state.targetTime || 0) * 6) * 1.5));
 
     if (charId === 'spiderman') {
-      // Body (red)
+      blitSprite(ctx, charId);
+      // Blue sleeves + red hands at his sides
+      ctx.fillStyle = '#2255cc';
+      ctx.fillRect(-32, -17, 8, 6);
+      ctx.fillRect(24, -17, 8, 6);
       ctx.fillStyle = '#cc0000';
-      ctx.fillRect(-12, -30, 24, 30);
-      // Head (masked - red)
-      ctx.fillStyle = '#cc0000';
-      ctx.fillRect(-10, -44, 20, 16);
-      // Eyes (white lenses)
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(-8, -40, 6, 4);
-      ctx.fillRect(2, -40, 6, 4);
-      // Web pattern (blue lines)
-      ctx.strokeStyle = '#222266';
-      ctx.lineWidth = 1;
-      for (let i = -10; i <= 10; i += 5) {
-        ctx.beginPath();
-        ctx.moveTo(i, -28);
-        ctx.lineTo(i + 4, -10);
-        ctx.stroke();
-      }
-      // Legs (blue)
-      ctx.fillStyle = '#222266';
-      ctx.fillRect(-14, 0, 10, 16);
-      ctx.fillRect(4, 0, 10, 16);
-      // Arms (red)
-      ctx.fillStyle = '#cc0000';
-      ctx.fillRect(-22, -28, 10, 8);
-      ctx.fillRect(12, -28, 10, 8);
-      // Web shooters
-      ctx.fillStyle = '#888';
-      ctx.fillRect(20, -26, 4, 4);
-
-      // Retro finish: black outline, side shading, eye glint
-      ctx.strokeStyle = '#0a0a12';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(-12, -30, 24, 30);
-      ctx.strokeRect(-10, -44, 20, 16);
-      ctx.fillStyle = '#7a0000';
-      ctx.fillRect(4, -30, 8, 30);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(-8, -40, 2, 2);
+      ctx.fillRect(-36, -17, 4, 6);
+      ctx.fillRect(32, -17, 4, 6);
     } else if (charId === 'ironman') {
-      // Body armor (red)
+      blitSprite(ctx, charId);
+      // Red arms, gold fists, repulsor sparks
       ctx.fillStyle = '#a52a2a';
-      ctx.fillRect(-14, -30, 28, 32);
-      // Gold chest
+      ctx.fillRect(-33, -17, 9, 7);
+      ctx.fillRect(24, -17, 9, 7);
       ctx.fillStyle = '#daa520';
-      ctx.fillRect(-10, -22, 20, 12);
-      // Arc reactor (circle)
+      ctx.fillRect(-37, -17, 4, 7);
+      ctx.fillRect(33, -17, 4, 7);
       ctx.fillStyle = '#4fc3f7';
-      ctx.beginPath();
-      ctx.arc(0, -16, 5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(0, -16, 2, 0, Math.PI * 2);
-      ctx.fill();
-      // Head (gold helmet)
-      ctx.fillStyle = '#daa520';
-      ctx.fillRect(-10, -46, 20, 18);
-      // Eyes (blue glow)
-      ctx.fillStyle = '#4fc3f7';
-      ctx.fillRect(-8, -42, 6, 3);
-      ctx.fillRect(2, -42, 6, 3);
-      // Legs (red/gold)
-      ctx.fillStyle = '#a52a2a';
-      ctx.fillRect(-14, 2, 12, 14);
-      ctx.fillRect(2, 2, 12, 14);
-      ctx.fillStyle = '#daa520';
-      ctx.fillRect(-14, 12, 12, 4);
-      ctx.fillRect(2, 12, 12, 4);
-      // Arms (red)
-      ctx.fillStyle = '#a52a2a';
-      ctx.fillRect(-24, -28, 10, 10);
-      ctx.fillRect(14, -28, 10, 10);
-      // Repulsor glow
-      ctx.fillStyle = '#4fc3f7';
-      ctx.fillRect(22, -26, 4, 4);
-
-      // Retro finish: black outline, side shading, eye glint
-      ctx.strokeStyle = '#0a0a12';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(-14, -30, 28, 32);
-      ctx.strokeRect(-10, -46, 20, 18);
-      ctx.fillStyle = '#6e1f1f';
-      ctx.fillRect(6, -30, 8, 32);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(-8, -42, 2, 1);
+      ctx.fillRect(-37, -15, 2, 3);
+      ctx.fillRect(35, -15, 2, 3);
     } else {
-      // Legolas
-      // Body (green)
-      ctx.fillStyle = '#2e7d32';
-      ctx.fillRect(-10, -28, 20, 28);
-      // Tunic (brown)
-      ctx.fillStyle = '#5d4037';
-      ctx.fillRect(-8, -16, 16, 10);
-      // Head (elf)
-      ctx.fillStyle = '#ffccbc';
-      ctx.fillRect(-8, -44, 16, 18);
-      // Pointed ears
-      ctx.fillStyle = '#ffccbc';
-      ctx.beginPath();
-      ctx.moveTo(-8, -36);
-      ctx.lineTo(-16, -40);
-      ctx.lineTo(-8, -32);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(8, -36);
-      ctx.lineTo(16, -40);
-      ctx.lineTo(8, -32);
-      ctx.fill();
-      // Hair (blonde)
-      ctx.fillStyle = '#ffd54f';
-      ctx.fillRect(-10, -44, 20, 8);
-      ctx.fillRect(-10, -40, 4, 12);
-      ctx.fillRect(6, -40, 4, 12);
-      // Eyes
-      ctx.fillStyle = '#4fc3f7';
-      ctx.fillRect(-5, -38, 3, 2);
-      ctx.fillRect(2, -38, 3, 2);
-      // Legs (brown)
-      ctx.fillStyle = '#5d4037';
-      ctx.fillRect(-10, 0, 8, 16);
-      ctx.fillRect(2, 0, 8, 16);
-      // Extended arm reaching for the bow (bow itself drawn in-world, aimed)
-      ctx.fillStyle = '#2e7d32';
-      ctx.fillRect(8, -24, 16, 7);
+      // Legolas — true pixel-art sprite + pointed ears
+      blitSprite(ctx, charId);
+      // Pointed elven ears poking out of the blonde hair (head row 4)
       ctx.fillStyle = '#ffcc99';
-      ctx.fillRect(22, -24, 5, 7);
-
-      // Retro finish: black outline, side shading, eye glint
-      ctx.strokeStyle = '#0a0a12';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(-10, -28, 20, 28);
-      ctx.strokeRect(-8, -44, 16, 18);
-      ctx.fillStyle = '#1b5e20';
-      ctx.fillRect(2, -28, 8, 28);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(-5, -38, 1, 1);
+      ctx.fillRect(-29, -34, 4, 3);
+      ctx.fillRect(25, -34, 4, 3);
+      ctx.fillStyle = '#0a0a12';
+      ctx.fillRect(-30, -34, 1, 2);
+      ctx.fillRect(29, -34, 1, 2);
+      // Left arm relaxed, right arm extended to the bow grip
+      ctx.fillStyle = '#2e7d32';
+      ctx.fillRect(-31, -19, 7, 14);
+      ctx.fillRect(12, -17, 10, 6);
+      ctx.fillStyle = '#ffcc99';
+      ctx.fillRect(-31, -5, 7, 5);
+      ctx.fillRect(20, -17, 6, 6);
     }
 
     ctx.restore();
